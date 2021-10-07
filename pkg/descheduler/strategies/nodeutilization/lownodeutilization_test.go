@@ -47,6 +47,7 @@ func TestLowNodeUtilization(t *testing.T) {
 
 	testCases := []struct {
 		name                         string
+		useDeviationThresholds       bool
 		thresholds, targetThresholds api.ResourceThresholds
 		nodes                        map[string]*v1.Node
 		pods                         map[string]*v1.PodList
@@ -732,6 +733,242 @@ func TestLowNodeUtilization(t *testing.T) {
 			maxPodsToEvictPerNode: 0,
 			expectedPodsEvicted:   3,
 		},
+		{
+			name: "deviation thresholds allow any deviation",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  100,
+				v1.ResourcePods: 100,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  100,
+				v1.ResourcePods: 100,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   0,
+		},
+		{
+			name: "deviation thresholds",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  5,
+				v1.ResourcePods: 5,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  5,
+				v1.ResourcePods: 5,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   2,
+		},
+		{
+			name: "deviation thresholds only CPU",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 5,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 5,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   3,
+		},
+		{
+			name: "deviation thresholds no overutilized",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 5,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 100,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   0,
+		},
 	}
 
 	for _, test := range testCases {
@@ -799,8 +1036,9 @@ func TestLowNodeUtilization(t *testing.T) {
 				Enabled: true,
 				Params: &api.StrategyParameters{
 					NodeResourceUtilizationThresholds: &api.NodeResourceUtilizationThresholds{
-						Thresholds:       test.thresholds,
-						TargetThresholds: test.targetThresholds,
+						UseDeviationThresholds: test.useDeviationThresholds,
+						Thresholds:             test.thresholds,
+						TargetThresholds:       test.targetThresholds,
 					},
 					NodeFit: true,
 				},
@@ -820,154 +1058,174 @@ func TestLowNodeUtilization(t *testing.T) {
 
 func TestValidateLowNodeUtilizationStrategyConfig(t *testing.T) {
 	tests := []struct {
-		name             string
-		thresholds       api.ResourceThresholds
-		targetThresholds api.ResourceThresholds
-		errInfo          error
+		name string
+		strategyConfig *api.NodeResourceUtilizationThresholds
+		errInfo        error
 	}{
 		{
 			name: "passing invalid thresholds",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 120,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 120,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds config is not valid: %v", fmt.Errorf(
 				"%v threshold not in [%v, %v] range", v1.ResourceMemory, MinResourcePercentage, MaxResourcePercentage)),
 		},
 		{
 			name: "thresholds and targetThresholds configured different num of resources",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-				v1.ResourcePods:   80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+					v1.ResourcePods:   80,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds and targetThresholds configured different resources"),
 		},
 		{
 			name: "thresholds and targetThresholds configured different resources",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:  80,
-				v1.ResourcePods: 80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:  80,
+					v1.ResourcePods: 80,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds and targetThresholds configured different resources"),
 		},
 		{
 			name: "thresholds' CPU config value is greater than targetThresholds'",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    90,
-				v1.ResourceMemory: 20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    90,
+					v1.ResourceMemory: 20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds' %v percentage is greater than targetThresholds'", v1.ResourceCPU),
 		},
 		{
 			name: "only thresholds configured extended resource",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-				extendedResource:  20,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+					extendedResource:  20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+				},
 			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-			},
+
 			errInfo: fmt.Errorf("thresholds and targetThresholds configured different resources"),
 		},
 		{
 			name: "only targetThresholds configured extended resource",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-				extendedResource:  80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+					extendedResource:  80,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds and targetThresholds configured different resources"),
 		},
 		{
 			name: "thresholds and targetThresholds configured different extended resources",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-				extendedResource:  20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-				"example.com/bar": 80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+					extendedResource:  20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+					"example.com/bar": 80,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds and targetThresholds configured different resources"),
 		},
 		{
 			name: "thresholds' extended resource config value is greater than targetThresholds'",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-				extendedResource:  90,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-				extendedResource:  20,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+					extendedResource:  90,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+					extendedResource:  20,
+				},
 			},
 			errInfo: fmt.Errorf("thresholds' %v percentage is greater than targetThresholds'", extendedResource),
 		},
 		{
 			name: "passing valid strategy config",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+				},
 			},
 			errInfo: nil,
 		},
 		{
 			name: "passing valid strategy config with extended resource",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-				extendedResource:  20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-				extendedResource:  80,
+			strategyConfig: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+					extendedResource:  20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+					extendedResource:  80,
+				},
 			},
 			errInfo: nil,
 		},
 	}
 
 	for _, testCase := range tests {
-		validateErr := validateLowUtilizationStrategyConfig(testCase.thresholds, testCase.targetThresholds)
+		validateErr := validateLowUtilizationStrategyConfig(testCase.strategyConfig)
 
 		if validateErr == nil || testCase.errInfo == nil {
 			if validateErr != testCase.errInfo {
 				t.Errorf("expected validity of strategy config: thresholds %#v targetThresholds %#v to be %v but got %v instead",
-					testCase.thresholds, testCase.targetThresholds, testCase.errInfo, validateErr)
+					testCase.strategyConfig.Thresholds, testCase.strategyConfig.TargetThresholds, testCase.errInfo, validateErr)
 			}
 		} else if validateErr.Error() != testCase.errInfo.Error() {
 			t.Errorf("expected validity of strategy config: thresholds %#v targetThresholds %#v to be %v but got %v instead",
-				testCase.thresholds, testCase.targetThresholds, testCase.errInfo, validateErr)
+				testCase.strategyConfig.Thresholds, testCase.strategyConfig.TargetThresholds, testCase.errInfo, validateErr)
 		}
 	}
 }
