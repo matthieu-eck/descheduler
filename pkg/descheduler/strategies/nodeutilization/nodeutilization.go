@@ -64,11 +64,11 @@ func validateNodeUtilizationParams(params *api.StrategyParameters) error {
 }
 
 // validateThresholds checks if thresholds have valid resource name and resource percentage configured
-func validateThresholds(thresholds api.ResourceThresholds) error {
-	if thresholds == nil || len(thresholds) == 0 {
+func validateThresholds(strategyConfig *api.NodeResourceUtilizationThresholds) error {
+	if strategyConfig.Thresholds == nil || len(strategyConfig.Thresholds) == 0 {
 		return fmt.Errorf("no resource threshold is configured")
 	}
-	for name, percent := range thresholds {
+	for name, percent := range strategyConfig.Thresholds {
 		if percent < MinResourcePercentage || percent > MaxResourcePercentage {
 			return fmt.Errorf("%v threshold not in [%v, %v] range", name, MinResourcePercentage, MaxResourcePercentage)
 		}
@@ -80,7 +80,7 @@ func getNodeUsage(
 	ctx context.Context,
 	client clientset.Interface,
 	nodes []*v1.Node,
-	lowThreshold, highThreshold api.ResourceThresholds,
+	strategyConfig *api.NodeResourceUtilizationThresholds,
 	resourceNames []v1.ResourceName,
 ) []NodeUsage {
 	var nodeUsageList []NodeUsage
@@ -100,25 +100,25 @@ func getNodeUsage(
 			nodeCapacity = node.Status.Allocatable
 		}
 		lowResourceThreshold := map[v1.ResourceName]*resource.Quantity{
-			v1.ResourceCPU:    resource.NewMilliQuantity(int64(float64(lowThreshold[v1.ResourceCPU])*float64(nodeCapacity.Cpu().MilliValue())*0.01), resource.DecimalSI),
-			v1.ResourceMemory: resource.NewQuantity(int64(float64(lowThreshold[v1.ResourceMemory])*float64(nodeCapacity.Memory().Value())*0.01), resource.BinarySI),
-			v1.ResourcePods:   resource.NewQuantity(int64(float64(lowThreshold[v1.ResourcePods])*float64(nodeCapacity.Pods().Value())*0.01), resource.DecimalSI),
+			v1.ResourceCPU:    resource.NewMilliQuantity(int64(float64(strategyConfig.Thresholds[v1.ResourceCPU])*float64(nodeCapacity.Cpu().MilliValue())*0.01), resource.DecimalSI),
+			v1.ResourceMemory: resource.NewQuantity(int64(float64(strategyConfig.Thresholds[v1.ResourceMemory])*float64(nodeCapacity.Memory().Value())*0.01), resource.BinarySI),
+			v1.ResourcePods:   resource.NewQuantity(int64(float64(strategyConfig.Thresholds[v1.ResourcePods])*float64(nodeCapacity.Pods().Value())*0.01), resource.DecimalSI),
 		}
 		for _, name := range resourceNames {
 			if !isBasicResource(name) {
 				cap := nodeCapacity[name]
-				lowResourceThreshold[name] = resource.NewQuantity(int64(float64(lowThreshold[name])*float64(cap.Value())*0.01), resource.DecimalSI)
+				lowResourceThreshold[name] = resource.NewQuantity(int64(float64(strategyConfig.Thresholds[name])*float64(cap.Value())*0.01), resource.DecimalSI)
 			}
 		}
 		highResourceThreshold := map[v1.ResourceName]*resource.Quantity{
-			v1.ResourceCPU:    resource.NewMilliQuantity(int64(float64(highThreshold[v1.ResourceCPU])*float64(nodeCapacity.Cpu().MilliValue())*0.01), resource.DecimalSI),
-			v1.ResourceMemory: resource.NewQuantity(int64(float64(highThreshold[v1.ResourceMemory])*float64(nodeCapacity.Memory().Value())*0.01), resource.BinarySI),
-			v1.ResourcePods:   resource.NewQuantity(int64(float64(highThreshold[v1.ResourcePods])*float64(nodeCapacity.Pods().Value())*0.01), resource.DecimalSI),
+			v1.ResourceCPU:    resource.NewMilliQuantity(int64(float64(strategyConfig.TargetThresholds[v1.ResourceCPU])*float64(nodeCapacity.Cpu().MilliValue())*0.01), resource.DecimalSI),
+			v1.ResourceMemory: resource.NewQuantity(int64(float64(strategyConfig.TargetThresholds[v1.ResourceMemory])*float64(nodeCapacity.Memory().Value())*0.01), resource.BinarySI),
+			v1.ResourcePods:   resource.NewQuantity(int64(float64(strategyConfig.TargetThresholds[v1.ResourcePods])*float64(nodeCapacity.Pods().Value())*0.01), resource.DecimalSI),
 		}
 		for _, name := range resourceNames {
 			if !isBasicResource(name) {
 				cap := nodeCapacity[name]
-				highResourceThreshold[name] = resource.NewQuantity(int64(float64(highThreshold[name])*float64(cap.Value())*0.01), resource.DecimalSI)
+				highResourceThreshold[name] = resource.NewQuantity(int64(float64(strategyConfig.TargetThresholds[name])*float64(cap.Value())*0.01), resource.DecimalSI)
 			}
 		}
 

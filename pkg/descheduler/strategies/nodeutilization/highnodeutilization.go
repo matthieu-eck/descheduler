@@ -49,19 +49,18 @@ func HighNodeUtilization(ctx context.Context, client clientset.Interface, strate
 		return
 	}
 
-	thresholds := strategy.Params.NodeResourceUtilizationThresholds.Thresholds
-	targetThresholds := strategy.Params.NodeResourceUtilizationThresholds.TargetThresholds
-	if err := validateHighUtilizationStrategyConfig(thresholds, targetThresholds); err != nil {
+	strategyConfig := strategy.Params.NodeResourceUtilizationThresholds
+	strategyConfig.TargetThresholds = make(api.ResourceThresholds)
+
+	if err := validateHighUtilizationStrategyConfig(strategyConfig); err != nil {
 		klog.ErrorS(err, "HighNodeUtilization config is not valid")
 		return
 	}
-	targetThresholds = make(api.ResourceThresholds)
 
-	setDefaultForThresholds(thresholds, targetThresholds)
-	resourceNames := getResourceNames(targetThresholds)
-
+	setDefaultForThresholds(strategyConfig)
+	resourceNames := getResourceNames(strategyConfig.TargetThresholds)
 	sourceNodes, highNodes := classifyNodes(
-		getNodeUsage(ctx, client, nodes, thresholds, targetThresholds, resourceNames),
+		getNodeUsage(ctx, client, nodes, strategyConfig, resourceNames),
 		func(node *v1.Node, usage NodeUsage) bool {
 			return isNodeWithLowUtilization(usage)
 		},
@@ -75,13 +74,13 @@ func HighNodeUtilization(ctx context.Context, client clientset.Interface, strate
 
 	// log message in one line
 	keysAndValues := []interface{}{
-		"CPU", thresholds[v1.ResourceCPU],
-		"Mem", thresholds[v1.ResourceMemory],
-		"Pods", thresholds[v1.ResourcePods],
+		"CPU", strategyConfig.Thresholds[v1.ResourceCPU],
+		"Mem", strategyConfig.Thresholds[v1.ResourceMemory],
+		"Pods", strategyConfig.Thresholds[v1.ResourcePods],
 	}
-	for name := range thresholds {
+	for name := range strategyConfig.Thresholds {
 		if !isBasicResource(name) {
-			keysAndValues = append(keysAndValues, string(name), int64(thresholds[name]))
+			keysAndValues = append(keysAndValues, string(name), int64(strategyConfig.Thresholds[name]))
 		}
 	}
 
@@ -129,8 +128,8 @@ func HighNodeUtilization(ctx context.Context, client clientset.Interface, strate
 
 }
 
-func validateHighUtilizationStrategyConfig(thresholds, targetThresholds api.ResourceThresholds) error {
-	if targetThresholds != nil {
+func validateHighUtilizationStrategyConfig(thresholds *api.NodeResourceUtilizationThresholds) error {
+	if len(thresholds.TargetThresholds) != 0 {
 		return fmt.Errorf("targetThresholds is not applicable for HighNodeUtilization")
 	}
 	if err := validateThresholds(thresholds); err != nil {
@@ -139,26 +138,28 @@ func validateHighUtilizationStrategyConfig(thresholds, targetThresholds api.Reso
 	return nil
 }
 
-func setDefaultForThresholds(thresholds, targetThresholds api.ResourceThresholds) {
+
+func setDefaultForThresholds(thresholds *api.NodeResourceUtilizationThresholds) {
+
 	// check if Pods/CPU/Mem are set, if not, set them to 100
-	if _, ok := thresholds[v1.ResourcePods]; !ok {
-		thresholds[v1.ResourcePods] = MaxResourcePercentage
+	if _, ok := thresholds.Thresholds[v1.ResourcePods]; !ok {
+		thresholds.Thresholds[v1.ResourcePods] = MaxResourcePercentage
 	}
-	if _, ok := thresholds[v1.ResourceCPU]; !ok {
-		thresholds[v1.ResourceCPU] = MaxResourcePercentage
+	if _, ok := thresholds.Thresholds[v1.ResourceCPU]; !ok {
+		thresholds.Thresholds[v1.ResourceCPU] = MaxResourcePercentage
 	}
-	if _, ok := thresholds[v1.ResourceMemory]; !ok {
-		thresholds[v1.ResourceMemory] = MaxResourcePercentage
+	if _, ok := thresholds.Thresholds[v1.ResourceMemory]; !ok {
+		thresholds.Thresholds[v1.ResourceMemory] = MaxResourcePercentage
 	}
 
 	// Default targetThreshold resource values to 100
-	targetThresholds[v1.ResourcePods] = MaxResourcePercentage
-	targetThresholds[v1.ResourceCPU] = MaxResourcePercentage
-	targetThresholds[v1.ResourceMemory] = MaxResourcePercentage
+	thresholds.TargetThresholds[v1.ResourcePods] = MaxResourcePercentage
+	thresholds.TargetThresholds[v1.ResourceCPU] = MaxResourcePercentage
+	thresholds.TargetThresholds[v1.ResourceMemory] = MaxResourcePercentage
 
-	for name := range thresholds {
+	for name := range thresholds.Thresholds {
 		if !isBasicResource(name) {
-			targetThresholds[name] = MaxResourcePercentage
+			thresholds.TargetThresholds[name] = MaxResourcePercentage
 		}
 	}
 }

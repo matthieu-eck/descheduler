@@ -608,67 +608,79 @@ func TestHighNodeUtilization(t *testing.T) {
 
 func TestValidateHighNodeUtilizationStrategyConfig(t *testing.T) {
 	tests := []struct {
-		name             string
-		thresholds       api.ResourceThresholds
-		targetThresholds api.ResourceThresholds
-		errInfo          error
+		name    string
+		config  *api.NodeResourceUtilizationThresholds
+		errInfo error
 	}{
 		{
 			name: "passing target thresholds",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    20,
-				v1.ResourceMemory: 20,
-			},
-			targetThresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 20,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+				},
 			},
 			errInfo: fmt.Errorf("targetThresholds is not applicable for HighNodeUtilization"),
 		},
 		{
-			name:       "passing empty thresholds",
-			thresholds: api.ResourceThresholds{},
-			errInfo:    fmt.Errorf("thresholds config is not valid: no resource threshold is configured"),
+			name: "passing empty thresholds",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{},
+			},
+			errInfo: fmt.Errorf("thresholds config is not valid: no resource threshold is configured"),
 		},
+
 		{
 			name: "passing invalid thresholds",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 120,
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 120,
+				},
 			},
+
 			errInfo: fmt.Errorf("thresholds config is not valid: %v", fmt.Errorf(
 				"%v threshold not in [%v, %v] range", v1.ResourceMemory, MinResourcePercentage, MaxResourcePercentage)),
 		},
 		{
 			name: "passing valid strategy config",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+				},
 			},
 			errInfo: nil,
 		},
 		{
 			name: "passing valid strategy config with extended resource",
-			thresholds: api.ResourceThresholds{
-				v1.ResourceCPU:    80,
-				v1.ResourceMemory: 80,
-				extendedResource:  80,
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    80,
+					v1.ResourceMemory: 80,
+					extendedResource:  80,
+				},
 			},
+
 			errInfo: nil,
 		},
 	}
 
 	for _, testCase := range tests {
-		validateErr := validateHighUtilizationStrategyConfig(testCase.thresholds, testCase.targetThresholds)
+		validateErr := validateHighUtilizationStrategyConfig(testCase.config)
 
 		if validateErr == nil || testCase.errInfo == nil {
 			if validateErr != testCase.errInfo {
 				t.Errorf("expected validity of strategy config: thresholds %#v targetThresholds %#v to be %v but got %v instead",
-					testCase.thresholds, testCase.targetThresholds, testCase.errInfo, validateErr)
+					testCase.config.Thresholds, testCase.config.TargetThresholds, testCase.errInfo, validateErr)
 			}
 		} else if validateErr.Error() != testCase.errInfo.Error() {
 			t.Errorf("expected validity of strategy config: thresholds %#v targetThresholds %#v to be %v but got %v instead",
-				testCase.thresholds, testCase.targetThresholds, testCase.errInfo, validateErr)
+				testCase.config.Thresholds, testCase.config.TargetThresholds, testCase.errInfo, validateErr)
 		}
 	}
 }
