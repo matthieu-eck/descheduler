@@ -669,7 +669,6 @@ func TestValidateHighNodeUtilizationStrategyConfig(t *testing.T) {
 			errInfo: nil,
 		},
 	}
-
 	for _, testCase := range tests {
 		validateErr := validateHighUtilizationStrategyConfig(testCase.config)
 

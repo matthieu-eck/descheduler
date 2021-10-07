@@ -61,10 +61,10 @@ func HighNodeUtilization(ctx context.Context, client clientset.Interface, strate
 	resourceNames := getResourceNames(strategyConfig.TargetThresholds)
 	sourceNodes, highNodes := classifyNodes(
 		getNodeUsage(ctx, client, nodes, strategyConfig, resourceNames),
-		func(node *v1.Node, usage NodeUsage) bool {
+		func(node *v1.Node, usage *NodeUsage) bool {
 			return isNodeWithLowUtilization(usage)
 		},
-		func(node *v1.Node, usage NodeUsage) bool {
+		func(node *v1.Node, usage *NodeUsage) bool {
 			if nodeutil.IsNodeUnschedulable(node) {
 				klog.V(2).InfoS("Node is unschedulable", "node", klog.KObj(node))
 				return false
@@ -107,7 +107,7 @@ func HighNodeUtilization(ctx context.Context, client clientset.Interface, strate
 	evictable := podEvictor.Evictable(evictions.WithPriorityThreshold(thresholdPriority), evictions.WithNodeFit(nodeFit))
 
 	// stop if the total available usage has dropped to zero - no more pods can be scheduled
-	continueEvictionCond := func(nodeUsage NodeUsage, totalAvailableUsage map[v1.ResourceName]*resource.Quantity) bool {
+	continueEvictionCond := func(nodeUsage *NodeUsage, totalAvailableUsage map[v1.ResourceName]*resource.Quantity) bool {
 		for name := range totalAvailableUsage {
 			if totalAvailableUsage[name].CmpInt64(0) < 1 {
 				return false
@@ -132,12 +132,11 @@ func validateHighUtilizationStrategyConfig(thresholds *api.NodeResourceUtilizati
 	if len(thresholds.TargetThresholds) != 0 {
 		return fmt.Errorf("targetThresholds is not applicable for HighNodeUtilization")
 	}
-	if err := validateThresholds(thresholds); err != nil {
+	if err := validateThresholdsHigh(thresholds); err != nil {
 		return fmt.Errorf("thresholds config is not valid: %v", err)
 	}
 	return nil
 }
-
 
 func setDefaultForThresholds(thresholds *api.NodeResourceUtilizationThresholds) {
 

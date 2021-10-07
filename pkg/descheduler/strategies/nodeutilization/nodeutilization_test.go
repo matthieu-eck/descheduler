@@ -46,21 +46,85 @@ func TestValidateThresholds(t *testing.T) {
 			errInfo: fmt.Errorf("no resource threshold is configured"),
 		},
 		{
-			name: "passing no threshold",
+			name: "passing nil map for target threshold",
 			config: &api.NodeResourceUtilizationThresholds{
-				Thresholds: api.ResourceThresholds{},
+				TargetThresholds: nil,
 			},
 			errInfo: fmt.Errorf("no resource threshold is configured"),
 		},
 		{
-			name: "passing extended resource name other than cpu/memory/pods",
+			name: "passing no threshold",
 			config: &api.NodeResourceUtilizationThresholds{
-				Thresholds: api.ResourceThresholds{
-					v1.ResourceCPU:   40,
-					extendedResource: 50,
+				Thresholds: api.ResourceThresholds{},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
 				},
 			},
-			errInfo: nil,
+			errInfo: fmt.Errorf("no resource threshold is configured"),
+		},
+		{
+			name: "passing no target threshold",
+			config: &api.NodeResourceUtilizationThresholds{
+				TargetThresholds: api.ResourceThresholds{},
+			},
+			errInfo: fmt.Errorf("no resource threshold is configured"),
+		},
+		{
+			name: "passing unsupported resource name",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:     40,
+					v1.ResourceStorage: 25.5,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+			},
+			errInfo: fmt.Errorf("only cpu, memory, or pods thresholds can be specified"),
+		},
+		{
+			name: "passing unsupported resource name for target threshold",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:     40,
+					v1.ResourceStorage: 25.5,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+			},
+			errInfo: fmt.Errorf("only cpu, memory, or pods thresholds can be specified"),
+		},
+		{
+			name: "passing invalid resource name",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU: 40,
+					"coolResource": 42.0,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+			},
+			errInfo: fmt.Errorf("only cpu, memory, or pods thresholds can be specified"),
+		},
+		{
+			name: "passing invalid resource name for target threshold",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU: 40,
+					"coolResource": 42.0,
+				},
+			},
+			errInfo: fmt.Errorf("only cpu, memory, or pods thresholds can be specified"),
 		},
 		{
 			name: "passing invalid resource value",
@@ -69,13 +133,50 @@ func TestValidateThresholds(t *testing.T) {
 					v1.ResourceCPU:    110,
 					v1.ResourceMemory: 80,
 				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
 			},
 			errInfo: fmt.Errorf("%v threshold not in [%v, %v] range", v1.ResourceCPU, MinResourcePercentage, MaxResourcePercentage),
+		},
+		{
+			name: "passing invalid resource value for target threshold",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    110,
+					v1.ResourceMemory: 80,
+				},
+			},
+			errInfo: fmt.Errorf("%v threshold not in [%v, %v] range", v1.ResourceCPU, MinResourcePercentage, MaxResourcePercentage),
+		},
+		{
+			name: "passing > 100% resource value for target threshold is fine for deviation thresholds",
+			config: &api.NodeResourceUtilizationThresholds{
+				UseDeviationThresholds: true,
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    110,
+					v1.ResourceMemory: 80,
+				},
+			},
+			errInfo: nil,
 		},
 		{
 			name: "passing a valid threshold with max and min resource value",
 			config: &api.NodeResourceUtilizationThresholds{
 				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    100,
+					v1.ResourceMemory: 0,
+				},
+				TargetThresholds: api.ResourceThresholds{
 					v1.ResourceCPU:    100,
 					v1.ResourceMemory: 0,
 				},
@@ -86,7 +187,10 @@ func TestValidateThresholds(t *testing.T) {
 			name: "passing a valid threshold with only cpu",
 			config: &api.NodeResourceUtilizationThresholds{
 				Thresholds: api.ResourceThresholds{
-					v1.ResourceCPU: 80,
+					v1.ResourceCPU: 10,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU: 10,
 				},
 			},
 			errInfo: nil,
@@ -99,6 +203,25 @@ func TestValidateThresholds(t *testing.T) {
 					v1.ResourceMemory: 30,
 					v1.ResourcePods:   40,
 				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 30,
+					v1.ResourcePods:   40,
+				},
+			},
+			errInfo: nil,
+		},
+		{
+			name: "passing extended resource name other than cpu/memory/pods",
+			config: &api.NodeResourceUtilizationThresholds{
+				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:   40,
+					extendedResource: 50,
+				},
+				TargetThresholds: api.ResourceThresholds{
+					v1.ResourceCPU:   40,
+					extendedResource: 50,
+				},
 			},
 			errInfo: nil,
 		},
@@ -108,13 +231,23 @@ func TestValidateThresholds(t *testing.T) {
 				Thresholds: api.ResourceThresholds{
 					extendedResource: 80,
 				},
+				TargetThresholds: api.ResourceThresholds{
+					extendedResource: 80,
+				},
 			},
 			errInfo: nil,
 		},
 		{
 			name: "passing a valid threshold with cpu, memory, pods and extended resource",
 			config: &api.NodeResourceUtilizationThresholds{
+
 				Thresholds: api.ResourceThresholds{
+					v1.ResourceCPU:    20,
+					v1.ResourceMemory: 30,
+					v1.ResourcePods:   40,
+					extendedResource:  50,
+				},
+				TargetThresholds: api.ResourceThresholds{
 					v1.ResourceCPU:    20,
 					v1.ResourceMemory: 30,
 					v1.ResourcePods:   40,
@@ -124,20 +257,19 @@ func TestValidateThresholds(t *testing.T) {
 			errInfo: nil,
 		},
 	}
-
 	for _, test := range tests {
 		validateErr := validateThresholds(test.config)
-
+		fmt.Println(test.name)
 		if validateErr == nil || test.errInfo == nil {
 			if validateErr != test.errInfo {
-				t.Errorf("expected validity of threshold: %#v to be %v but got %v instead", test.config, test.errInfo, validateErr)
+				fmt.Println(test.name)
+				t.Errorf("ERROR: %v: expected validity of config: %#v to be %v but got %v instead", test.name, test.config, test.errInfo, validateErr)
 			}
 		} else if validateErr.Error() != test.errInfo.Error() {
-			t.Errorf("expected validity of threshold: %#v to be %v but got %v instead", test.config, test.errInfo, validateErr)
+			t.Errorf("expected validity of config: %#v to be %v but got %v instead", test.config, test.errInfo, validateErr)
 		}
 	}
 }
-
 func TestResourceUsagePercentages(t *testing.T) {
 	resourceUsagePercentage := resourceUsagePercentages(NodeUsage{
 		node: &v1.Node{

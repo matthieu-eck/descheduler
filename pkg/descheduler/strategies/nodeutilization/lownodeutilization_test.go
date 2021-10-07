@@ -47,6 +47,7 @@ func TestLowNodeUtilization(t *testing.T) {
 
 	testCases := []struct {
 		name                         string
+		useDeviationThresholds       bool
 		thresholds, targetThresholds api.ResourceThresholds
 		nodes                        map[string]*v1.Node
 		pods                         map[string]*v1.PodList
@@ -732,6 +733,242 @@ func TestLowNodeUtilization(t *testing.T) {
 			maxPodsToEvictPerNode: 0,
 			expectedPodsEvicted:   3,
 		},
+		{
+			name: "deviation thresholds allow any deviation",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  100,
+				v1.ResourcePods: 100,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  100,
+				v1.ResourcePods: 100,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   0,
+		},
+		{
+			name: "deviation thresholds",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  5,
+				v1.ResourcePods: 5,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU:  5,
+				v1.ResourcePods: 5,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   2,
+		},
+		{
+			name: "deviation thresholds only CPU",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 5,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 5,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   3,
+		},
+		{
+			name: "deviation thresholds no overutilized",
+			thresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 5,
+			},
+			targetThresholds: api.ResourceThresholds{
+				v1.ResourceCPU: 100,
+			},
+			useDeviationThresholds: true,
+			nodes: map[string]*v1.Node{
+				n1NodeName: test.BuildTestNode(n1NodeName, 4000, 3000, 9, nil),
+				n2NodeName: test.BuildTestNode(n2NodeName, 4000, 3000, 10, nil),
+				n3NodeName: test.BuildTestNode(n3NodeName, 4000, 3000, 10, test.SetNodeUnschedulable),
+			},
+			pods: map[string]*v1.PodList{
+				n1NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p1", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p2", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p3", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p4", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						*test.BuildTestPod("p5", 400, 0, n1NodeName, test.SetRSOwnerRef),
+						// These won't be evicted.
+						*test.BuildTestPod("p6", 400, 0, n1NodeName, test.SetDSOwnerRef),
+						*test.BuildTestPod("p7", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A pod with local storage.
+							test.SetNormalOwnerRef(pod)
+							pod.Spec.Volumes = []v1.Volume{
+								{
+									Name: "sample",
+									VolumeSource: v1.VolumeSource{
+										HostPath: &v1.HostPathVolumeSource{Path: "somePath"},
+										EmptyDir: &v1.EmptyDirVolumeSource{
+											SizeLimit: resource.NewQuantity(int64(10), resource.BinarySI)},
+									},
+								},
+							}
+							// A Mirror Pod.
+							pod.Annotations = test.GetMirrorPodAnnotation()
+						}),
+						*test.BuildTestPod("p8", 400, 0, n1NodeName, func(pod *v1.Pod) {
+							// A Critical Pod.
+							pod.Namespace = "kube-system"
+							priority := utils.SystemCriticalPriority
+							pod.Spec.Priority = &priority
+						}),
+					},
+				},
+				n2NodeName: {
+					Items: []v1.Pod{
+						*test.BuildTestPod("p9", 400, 0, n2NodeName, test.SetRSOwnerRef),
+					},
+				},
+				n3NodeName: {},
+			},
+			maxPodsToEvictPerNode: 0,
+			expectedPodsEvicted:   0,
+		},
 	}
 
 	for _, test := range testCases {
@@ -799,8 +1036,9 @@ func TestLowNodeUtilization(t *testing.T) {
 				Enabled: true,
 				Params: &api.StrategyParameters{
 					NodeResourceUtilizationThresholds: &api.NodeResourceUtilizationThresholds{
-						Thresholds:       test.thresholds,
-						TargetThresholds: test.targetThresholds,
+						UseDeviationThresholds: test.useDeviationThresholds,
+						Thresholds:             test.thresholds,
+						TargetThresholds:       test.targetThresholds,
 					},
 					NodeFit: true,
 				},
@@ -821,8 +1059,6 @@ func TestLowNodeUtilization(t *testing.T) {
 func TestValidateLowNodeUtilizationStrategyConfig(t *testing.T) {
 	tests := []struct {
 		name string
-		// thresholds       api.ResourceThresholds
-		// targetThresholds api.ResourceThresholds
 		strategyConfig *api.NodeResourceUtilizationThresholds
 		errInfo        error
 	}{

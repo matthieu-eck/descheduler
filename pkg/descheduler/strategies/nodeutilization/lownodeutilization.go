@@ -51,22 +51,25 @@ func LowNodeUtilization(ctx context.Context, client clientset.Interface, strateg
 	}
 
 	strategyConfig := strategy.Params.NodeResourceUtilizationThresholds
+
 	if err := validateLowUtilizationStrategyConfig(strategyConfig); err != nil {
 		klog.ErrorS(err, "LowNodeUtilization config is not valid")
 		return
 	}
 	// check if Pods/CPU/Mem are set, if not, set them to 100
-	if _, ok := strategyConfig.Thresholds[v1.ResourcePods]; !ok {
-		strategyConfig.Thresholds[v1.ResourcePods] = MaxResourcePercentage
-		strategyConfig.TargetThresholds[v1.ResourcePods] = MaxResourcePercentage
-	}
-	if _, ok := strategyConfig.Thresholds[v1.ResourceCPU]; !ok {
-		strategyConfig.Thresholds[v1.ResourceCPU] = MaxResourcePercentage
-		strategyConfig.TargetThresholds[v1.ResourceCPU] = MaxResourcePercentage
-	}
-	if _, ok := strategyConfig.Thresholds[v1.ResourceMemory]; !ok {
-		strategyConfig.Thresholds[v1.ResourceMemory] = MaxResourcePercentage
-		strategyConfig.TargetThresholds[v1.ResourceMemory] = MaxResourcePercentage
+	if !strategyConfig.UseDeviationThresholds {
+		if _, ok := strategyConfig.Thresholds[v1.ResourcePods]; !ok {
+			strategyConfig.Thresholds[v1.ResourcePods] = MaxResourcePercentage
+			strategyConfig.TargetThresholds[v1.ResourcePods] = MaxResourcePercentage
+		}
+		if _, ok := strategyConfig.Thresholds[v1.ResourceCPU]; !ok {
+			strategyConfig.Thresholds[v1.ResourceCPU] = MaxResourcePercentage
+			strategyConfig.TargetThresholds[v1.ResourceCPU] = MaxResourcePercentage
+		}
+		if _, ok := strategyConfig.Thresholds[v1.ResourceMemory]; !ok {
+			strategyConfig.Thresholds[v1.ResourceMemory] = MaxResourcePercentage
+			strategyConfig.TargetThresholds[v1.ResourceMemory] = MaxResourcePercentage
+		}
 	}
 	resourceNames := getResourceNames(strategyConfig.Thresholds)
 
@@ -74,14 +77,14 @@ func LowNodeUtilization(ctx context.Context, client clientset.Interface, strateg
 		getNodeUsage(ctx, client, nodes, strategyConfig, resourceNames),
 
 		// The node has to be schedulable (to be able to move workload there)
-		func(node *v1.Node, usage NodeUsage) bool {
+		func(node *v1.Node, usage *NodeUsage) bool {
 			if nodeutil.IsNodeUnschedulable(node) {
 				klog.V(2).InfoS("Node is unschedulable, thus not considered as underutilized", "node", klog.KObj(node))
 				return false
 			}
 			return isNodeWithLowUtilization(usage)
 		},
-		func(node *v1.Node, usage NodeUsage) bool {
+		func(node *v1.Node, usage *NodeUsage) bool {
 			return isNodeAboveTargetUtilization(usage)
 		},
 	)
@@ -136,13 +139,14 @@ func LowNodeUtilization(ctx context.Context, client clientset.Interface, strateg
 
 	evictable := podEvictor.Evictable(evictions.WithPriorityThreshold(thresholdPriority), evictions.WithNodeFit(nodeFit))
 
-	// stop if node utilization drops below target threshold or any of required capacity (cpu, memory, pods) is moved
-	continueEvictionCond := func(nodeUsage NodeUsage, totalAvailableUsage map[v1.ResourceName]*resource.Quantity) bool {
+	continueEvictionCond := func(nodeUsage *NodeUsage, totalAvailableUsage map[v1.ResourceName]*resource.Quantity) bool {
 		if !isNodeAboveTargetUtilization(nodeUsage) {
 			return false
 		}
 		for name := range totalAvailableUsage {
-			if totalAvailableUsage[name].CmpInt64(0) < 1 {
+			// if a targetThreshold is not defined for a resource, we should not break the eviction loop
+			_, targetThresholdDefined := strategyConfig.TargetThresholds[name]
+			if targetThresholdDefined && (totalAvailableUsage[name].CmpInt64(0) < 1) {
 				return false
 			}
 		}
@@ -170,7 +174,7 @@ func validateLowUtilizationStrategyConfig(thresholds *api.NodeResourceUtilizatio
 	if err := validateThresholds(thresholds); err != nil {
 		return fmt.Errorf("thresholds config is not valid: %v", err)
 	}
-	//if err := validateThresholds(thresholds.TargetThresholds); err != nil {TODO: fix
+	//if err := validateThresholds(thresholds.TargetThresholds); err != nil { //TODO: to check
 	//	return fmt.Errorf("targetThresholds config is not valid: %v", err)
 	//}
 
